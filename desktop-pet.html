@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>草神桌面宠物 · 吃原石版（可自定义隐藏语音）</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        body {
+            background: url('back.png') center/cover no-repeat fixed;
+            cursor: none;
+        }
+
+        #cursor {
+            position: fixed;
+            width: 20px;
+            height: 20px;
+            background: radial-gradient(circle, #7FFF00, #32CD32);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 9999;
+            box-shadow: 0 0 10px #7FFF00;
+        }
+
+        #character {
+            position: fixed;
+            width: 150px;
+            height: 150px;
+            transition: transform 0.1s;
+            cursor: pointer;
+            z-index: 9998;
+        }
+
+        #character img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));
+        }
+
+        .nahida {
+            font-size: 60px;
+            filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));
+        }
+
+        #chatBubble {
+            position: fixed;
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 15px;
+            max-width: 300px;
+            display: none;
+            z-index: 9997;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            font-size: 14px;
+            color: #333;
+            word-wrap: break-word;
+        }
+
+        #inputBox {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 500px;
+            padding: 12px;
+            border: 2px solid #7FFF00;
+            border-radius: 25px;
+            background: rgba(255,255,255,0.9);
+            font-size: 16px;
+            display: none;
+            z-index: 10000;
+            cursor: text;
+            outline: none;
+        }
+
+        /* 原石容器 */
+        #primos-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 鼠标穿透，不干扰点击和右键 */
+            z-index: 9996;
+        }
+        .primo {
+            position: absolute;
+            width: 40px;          /* 可根据图片实际大小调整 */
+            height: 40px;
+            background: url('primo.png') center/contain no-repeat; /* 使用图片，居中且保持比例 */
+            /* 移除原有的渐变背景和阴影 */
+            /* background: radial-gradient(...);  */  /* 注释掉或删除 */
+            /* box-shadow: 0 0 15px #FFD700; */      /* 根据需要保留或删除 */
+            transform: translate(-50%, -50%);
+            animation: twinkle 2s infinite alternate; /* 动画可保留，让图片也有闪烁效果 */
+        }
+        @keyframes twinkle {
+            0% { opacity: 0.8; transform: scale(1) translate(-50%, -50%); }
+            100% { opacity: 1; transform: scale(1.2) translate(-50%, -50%); }
+        }
+        /* 如果用图片替换背景，取消下面注释并注释掉上面的background */
+        /* .primo { background: url('primo.png') center/contain no-repeat; } */
+    </style>
+</head>
+<body>
+    <audio id="bgMusic" loop>
+        <source src="music/back.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="voiceClick" src="voice/catch.mp3"></audio>
+
+    <div id="cursor"></div>
+    <div id="character">
+        <img src="nahida.png" alt="纳西妲" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\'nahida\'>🌱</div>'">
+    </div>
+    <div id="chatBubble"></div>
+    <input type="text" id="inputBox" placeholder="按空格与纳西妲对话...">
+
+    <!-- 原石容器 -->
+    <div id="primos-container"></div>
+
+    <script>
+        // 音频元素
+        const music = document.getElementById('bgMusic');
+        const voiceClick = document.getElementById('voiceClick');
+        const cursor = document.getElementById('cursor');
+        const character = document.getElementById('character');
+        const chatBubble = document.getElementById('chatBubble');
+        const inputBox = document.getElementById('inputBox');
+        const primosContainer = document.getElementById('primos-container');
+
+        // ========== 语音文件配置 ==========
+        // 1. 闲置语音（背景随机播放）
+        const idleVoices = [
+            'voice/idle1.mp3',
+            'voice/idle2.mp3',
+            'voice/idle3.mp3'
+        ];
+
+        // 2. 隐藏语音（当吃原石达到特定分数时播放）
+        //    ⚠️ 请将您自己的隐藏语音文件放在 voice/ 文件夹下，并在下面数组中填写路径
+        const secretVoices = [
+            'voice/secret1.mp3',   // 替换为您的文件
+            'voice/secret2.mp3',
+            'voice/secret3.mp3'
+            // 您可以继续添加更多，达到阈值时会随机选一个播放
+        ];
+
+        music.volume = 0.3;
+        voiceClick.volume = 0.7;
+
+        // 角色位置与速度
+        let mouseX = window.innerWidth / 2;
+        let mouseY = window.innerHeight / 2;
+        let charX = 100;
+        let charY = 100;
+        let velocityX = 0;
+        let velocityY = 0;
+        let lastVoiceTime = Date.now();
+        let isIdleMode = false;
+        let targetX = 100;
+        let targetY = 100;
+
+        // 对话历史记录
+        let conversationHistory = [
+            { role: 'system', content: '你是一个可爱的草神纳西妲，请用活泼可爱的语气回答问题，语言简洁。' }
+        ];
+        const MAX_HISTORY = 10;
+
+        // ========== 原石相关 ==========
+        let primos = [];                     // 当前存在的原石对象 { x, y, element }
+        const PRIMO_EAT_DISTANCE = 50;        // 角色吃到原石的距离
+        const MAX_PRIMOS = 5;                  // 最多同时存在几个原石
+        let primoCount = 0;                    // 累计吃到的原石总数（分数）
+        // 分数阈值，达到时播放隐藏语音（您可以自由增删或修改数值）
+        const THRESHOLDS = [5, 10, 15, 20, 30, 50];
+        let triggeredThresholds = [];           // 已触发过的阈值，避免重复触发
+
+        // 生成一个新原石（随机位置）
+        function spawnPrimo() {
+            if (primos.length >= MAX_PRIMOS) return;
+
+            const x = 50 + Math.random() * (window.innerWidth - 100);
+            const y = 50 + Math.random() * (window.innerHeight - 100);
+
+            const div = document.createElement('div');
+            div.className = 'primo';
+            div.style.left = x + 'px';
+            div.style.top = y + 'px';
+            primosContainer.appendChild(div);
+
+            primos.push({ x, y, element: div });
+        }
+
+        // 移除原石
+        function removePrimo(primo) {
+            const index = primos.indexOf(primo);
+            if (index !== -1) {
+                primos.splice(index, 1);
+                primo.element.remove();
+            }
+        }
+
+        // 检查分数阈值并播放隐藏语音（从 secretVoices 中随机选一个）
+        function checkThresholdAndPlaySecret() {
+            for (let th of THRESHOLDS) {
+                if (primoCount >= th && !triggeredThresholds.includes(th)) {
+                    triggeredThresholds.push(th);
+                    if (secretVoices.length > 0) {
+                        const randomIndex = Math.floor(Math.random() * secretVoices.length);
+                        const audio = new Audio(secretVoices[randomIndex]);
+                        audio.volume = 0.6;
+                        audio.play().catch(() => console.log('隐藏语音播放失败（可能文件不存在）'));
+                        console.log(`🎉 达到 ${th} 原石，播放隐藏语音: ${secretVoices[randomIndex]}`);
+                    }
+                    break; // 一次只触发一个阈值
+                }
+            }
+        }
+
+        // 点击任意位置开始背景音乐
+        document.addEventListener('click', () => music.play(), { once: true });
+
+        // 角色点击事件：播放音效
+        character.addEventListener('click', (e) => {
+            e.stopPropagation();
+            voiceClick.currentTime = 0;
+            voiceClick.play();
+        });
+
+        // 角色右键事件：切换待机模式
+        character.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isIdleMode = !isIdleMode;
+            if (isIdleMode) {
+                setRandomTarget();
+            }
+        });
+
+        // 全局右键事件：待机模式下右键空白区域退出待机
+        document.addEventListener('contextmenu', (e) => {
+            if (isIdleMode && e.target !== inputBox) {
+                e.preventDefault();
+                isIdleMode = false;
+            }
+        });
+
+        // 空格键唤出输入框
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                inputBox.style.display = inputBox.style.display === 'none' ? 'block' : 'none';
+                if (inputBox.style.display === 'block') {
+                    inputBox.focus();
+                }
+            }
+        });
+
+        // 输入框回车发送消息
+        inputBox.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && inputBox.value.trim()) {
+                const userInput = inputBox.value.trim();
+                inputBox.value = '';
+                inputBox.style.display = 'none';
+                await handleChat(userInput);
+            }
+        });
+
+        // 随机播放闲置语音（背景随机语音，与隐藏语音无关）
+        function playRandomVoice() {
+            if (idleVoices.length === 0) return;
+            const randomVoice = idleVoices[Math.floor(Math.random() * idleVoices.length)];
+            const audio = new Audio(randomVoice);
+            audio.volume = 0.6;
+            audio.play().catch(() => {});
+        }
+
+        // 设置随机移动目标点（待机模式用）
+        function setRandomTarget() {
+            targetX = Math.random() * (window.innerWidth - 100);
+            targetY = Math.random() * (window.innerHeight - 100);
+        }
+
+        // 显示聊天气泡
+        function showChatBubble(text) {
+            chatBubble.textContent = text;
+            chatBubble.style.display = 'block';
+            chatBubble.style.left = charX + 'px';
+            chatBubble.style.top = (charY - 80) + 'px';
+            setTimeout(() => chatBubble.style.display = 'none', 5000);
+        }
+
+        // 调用通义千问API（带历史记忆）
+        async function handleChat(userInput) {
+            conversationHistory.push({ role: 'user', content: userInput });
+
+            if (conversationHistory.length > MAX_HISTORY + 1) {
+                conversationHistory = [
+                    conversationHistory[0],
+                    ...conversationHistory.slice(-MAX_HISTORY)
+                ];
+            }
+
+            try {
+                const response = await fetch('http://localhost:3000/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'qwen-turbo',
+                        input: { messages: conversationHistory },
+                        parameters: { result_format: 'message' }
+                    })
+                });
+                const data = await response.json();
+                const reply = data.output.choices[0].message.content;
+
+                conversationHistory.push({ role: 'assistant', content: reply });
+
+                // 显示气泡
+                showChatBubble(reply);
+
+                // 直接使用优化后的浏览器语音合成（可自行换成其他TTS）
+                fallbackSpeak(reply);
+            } catch (error) {
+                console.error('API错误:', error);
+                showChatBubble('纳西妲暂时无法回答，请稍后再试...');
+            }
+        }
+
+        // 浏览器原生语音合成（优选中⽂女声）
+        function fallbackSpeak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 1.1;
+            utterance.pitch = 1.3;
+
+            // 尝试选择好听的女声
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('晓晓') || v.name.includes('Google 普通话'));
+            if (preferred) utterance.voice = preferred;
+
+            speechSynthesis.speak(utterance);
+        }
+
+        // 鼠标移动更新光标
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            cursor.style.left = mouseX - 10 + 'px';
+            cursor.style.top = mouseY - 10 + 'px';
+        });
+
+        // 动画循环（包含原石碰撞检测）
+        function animate() {
+            let dx, dy;
+
+            if (isIdleMode) {
+                dx = targetX - charX;
+                dy = targetY - charY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < 20) setRandomTarget();
+
+                const now = Date.now();
+                if (now - lastVoiceTime > 10000 && Math.random() < 0.01) {
+                    playRandomVoice(); // 闲置时随机播放背景语音
+                    lastVoiceTime = now;
+                }
+            } else {
+                dx = mouseX - charX;
+                dy = mouseY - charY;
+            }
+
+            // 角色移动物理
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > 50) {
+                const acceleration = 0.3;
+                velocityX += (dx / distance) * acceleration;
+                velocityY += (dy / distance) * acceleration;
+            }
+
+            const friction = 0.85;
+            velocityX *= friction;
+            velocityY *= friction;
+
+            charX += velocityX;
+            charY += velocityY;
+
+            // 边界限制
+            charX = Math.max(50, Math.min(window.innerWidth - 50, charX));
+            charY = Math.max(50, Math.min(window.innerHeight - 50, charY));
+
+            // 原石碰撞检测（遍历所有原石）
+            for (let i = primos.length - 1; i >= 0; i--) {
+                const p = primos[i];
+                const dxPrimo = p.x - charX;
+                const dyPrimo = p.y - charY;
+                const distPrimo = Math.sqrt(dxPrimo * dxPrimo + dyPrimo * dyPrimo);
+                if (distPrimo < PRIMO_EAT_DISTANCE) {
+                    // 吃掉原石
+                    removePrimo(p);
+                    primoCount++;
+                    // 检查是否达到阈值播放隐藏语音
+                    checkThresholdAndPlaySecret();
+                }
+            }
+
+            // 翻转图片（根据水平速度）
+            if (Math.abs(velocityX) > 0.1 || Math.abs(velocityY) > 0.1) {
+                const angle = Math.atan2(velocityY, velocityX);
+                const flip = Math.abs(angle) > Math.PI / 2 ? 'scaleX(-1)' : 'scaleX(1)';
+                character.style.transform = flip;
+            }
+
+            character.style.left = charX - 50 + 'px';
+            character.style.top = charY - 50 + 'px';
+
+            requestAnimationFrame(animate);
+        }
+
+        // 启动原石生成定时器（每5秒一个）
+        setInterval(spawnPrimo, 5000);
+
+        animate();
+    </script>
+</body>
+</html>
