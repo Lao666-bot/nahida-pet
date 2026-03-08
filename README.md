@@ -22,5 +22,5 @@
 2. **安装依赖**（只需运行一次）：
    ```bash
    npm install express dotenv
-### 在.env中配置DashScope API Key
+### 在根目录创建.env文件.env中配置DashScope API Key
    DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
